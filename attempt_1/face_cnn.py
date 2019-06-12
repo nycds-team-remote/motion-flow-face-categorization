@@ -12,55 +12,9 @@ from keras.layers import Conv2D
 from keras.layers import MaxPooling2D
 from keras.layers import Flatten
 from keras.layers import Dense
+import sys
 
-# BUILD CNN MODEL
-
-
-def make_cnn(class_mode, output_dim):
-    classifier = Sequential()
-
-    # Step 1 - Convolution
-    classifier.add(
-        Conv2D(32, 3, 3, input_shape=(64, 64, 3), activation="relu")
-    )
-
-    # Step 2 - Pooling
-    classifier.add(MaxPooling2D(pool_size=(2, 2)))
-
-    # Adding a second convolutional layer
-    classifier.add(Conv2D(32, 3, 3, activation="relu"))
-    classifier.add(MaxPooling2D(pool_size=(2, 2)))
-
-    # Step 3 - Flattening
-    classifier.add(Flatten())
-
-    # Step 4 - Full connection
-    classifier.add(Dense(output_dim=128, activation="relu"))
-
-    if output_dim == 1:
-        last_activation = "sigmoid"
-    else:
-        last_activation = "softmax"
-
-    classifier.add(Dense(output_dim=output_dim, activation=last_activation))
-
-    if class_mode == "binary":
-        loss = "binary_crossentropy"
-    elif class_mode == "categorical":
-        loss = "categorical_crossentropy"
-    elif class_mode == "continuous":
-        loss = "mse"
-    else:
-        print(class_mode)
-        raise ValueError("unrecognised class_mode")
-
-    # Compiling the CNN
-    classifier.compile(optimizer="adam", loss=loss, metrics=["accuracy"])
-
-    return classifier
-
-
-# GET DATA
+# # GET DATA
 
 files = [f for f in glob.glob("face_dataset/**/*.jpg", recursive=True)]
 
@@ -117,83 +71,132 @@ rows = list(map(getRow, files))
 
 dataframe = pd.DataFrame(rows)
 
-# FIT MODEL AND SAVE MODEL AND INDICES
-train_datagen = ImageDataGenerator(
-    rescale=1.0 / 255,
-    shear_range=0.2,
-    zoom_range=0.2,
-    horizontal_flip=True,
-    validation_split=0.2,
-)
 
+# BUILD CNN MODEL
 
-def fit_and_save_model(target, class_mode):
-    df = dataframe
+if "--retrain" in sys.argv:
+    print("retraining model")
 
-    if class_mode == "categorical":
-        output_dim = len(np.unique(df[target]))
-    else:
-        output_dim = 1
+    def make_cnn(class_mode, output_dim):
+        classifier = Sequential()
 
-    classifier = make_cnn(class_mode, output_dim)
+        # Step 1 - Convolution
+        classifier.add(
+            Conv2D(32, 3, 3, input_shape=(64, 64, 3), activation="relu")
+        )
 
-    if class_mode == "binary":
-        class_mode = "binary"
-    elif class_mode == "categorical":
-        class_mode = "categorical"
-    elif class_mode == "continuous":
-        class_mode = None  # not sure why this works?
-    else:
-        print(class_mode)
-        raise ValueError("unrecognised class_mode")
+        # Step 2 - Pooling
+        classifier.add(MaxPooling2D(pool_size=(2, 2)))
 
-    training_set = train_datagen.flow_from_dataframe(
-        df,
-        directory=None,
-        x_col="filename",
-        y_col=target,
-        target_size=(64, 64),
-        class_mode=class_mode,
-        batch_size=32,
-        subset="training",
+        # Adding a second convolutional layer
+        classifier.add(Conv2D(32, 3, 3, activation="relu"))
+        classifier.add(MaxPooling2D(pool_size=(2, 2)))
+
+        # Step 3 - Flattening
+        classifier.add(Flatten())
+
+        # Step 4 - Full connection
+        classifier.add(Dense(output_dim=128, activation="relu"))
+
+        if output_dim == 1:
+            last_activation = "sigmoid"
+        else:
+            last_activation = "softmax"
+
+        classifier.add(
+            Dense(output_dim=output_dim, activation=last_activation)
+        )
+
+        if class_mode == "binary":
+            loss = "binary_crossentropy"
+        elif class_mode == "categorical":
+            loss = "categorical_crossentropy"
+        elif class_mode == "continuous":
+            loss = "mse"
+        else:
+            print(class_mode)
+            raise ValueError("unrecognised class_mode")
+
+        # Compiling the CNN
+        classifier.compile(optimizer="adam", loss=loss, metrics=["accuracy"])
+
+        return classifier
+
+    # FIT MODEL AND SAVE MODEL AND INDICES
+    train_datagen = ImageDataGenerator(
+        rescale=1.0 / 255,
+        shear_range=0.2,
+        zoom_range=0.2,
+        horizontal_flip=True,
+        validation_split=0.2,
     )
 
-    test_set = train_datagen.flow_from_dataframe(
-        df,
-        directory=None,
-        x_col="filename",
-        y_col=target,
-        target_size=(64, 64),
-        class_mode=class_mode,
-        batch_size=32,
-        subset="validation",
-    )
+    def fit_and_save_model(target, class_mode):
+        df = dataframe
 
-    print(type(test_set))
+        if class_mode == "categorical":
+            output_dim = len(np.unique(df[target]))
+        else:
+            output_dim = 1
 
-    classifier.fit_generator(
-        training_set,
-        samples_per_epoch=5000,
-        epochs=10,
-        validation_data=test_set,
-        validation_steps=250,
-    )
+        classifier = make_cnn(class_mode, output_dim)
 
-    classifier.save(target + "_model.h5")
-    with open(target + "_class_indices.json", "w") as json_file:
-        json.dump(training_set.class_indices, json_file)
+        if class_mode == "binary":
+            class_mode = "binary"
+        elif class_mode == "categorical":
+            class_mode = "categorical"
+        elif class_mode == "continuous":
+            class_mode = None  # not sure why this works?
+        else:
+            print(class_mode)
+            raise ValueError("unrecognised class_mode")
 
-    return classifier, training_set, test_set
+        training_set = train_datagen.flow_from_dataframe(
+            df,
+            directory=None,
+            x_col="filename",
+            y_col=target,
+            target_size=(64, 64),
+            class_mode=class_mode,
+            batch_size=32,
+            subset="training",
+        )
 
+        test_set = train_datagen.flow_from_dataframe(
+            df,
+            directory=None,
+            x_col="filename",
+            y_col=target,
+            target_size=(64, 64),
+            class_mode=class_mode,
+            batch_size=32,
+            subset="validation",
+        )
 
-fit_and_save_model("race", "categorical")
+        print(type(test_set))
 
-fit_and_save_model("gender", "binary")
+        classifier.fit_generator(
+            training_set,
+            samples_per_epoch=5000,
+            epochs=10,
+            validation_data=test_set,
+            validation_steps=250,
+        )
 
-fit_and_save_model("age_category", "categorical")
+        classifier.save(target + "_model.h5")
+        with open(target + "_class_indices.json", "w") as json_file:
+            json.dump(training_set.class_indices, json_file)
+
+        return classifier, training_set, test_set
+
+    fit_and_save_model("race", "categorical")
+
+    fit_and_save_model("gender", "binary")
+
+    fit_and_save_model("age_category", "categorical")
 
 # PREDICT VALUES DATA TYPES
-
+print("predicting")
 age_category_model = load_model("./age_category_model.h5")
 gender_model = load_model("./gender_model.h5")
 race_model = load_model("./race_model.h5")
@@ -238,11 +241,13 @@ test_file = "face_dataset/caucasian/49.1_M.jpg"
 
 start = time.time()
 
-predict_gender(test_file)
-predict_age_category(test_file)
-predict_race(test_file)
+print("single results")
+print(predict_gender(test_file))
+print(predict_age_category(test_file))
+print(predict_race(test_file))
 
 end = time.time()
+print("timing")
 print((end - start) / 3)
 
 # OVERALL RESULTS
@@ -262,9 +267,9 @@ for col in ["age_category", "gender", "race"]:
     correct = (dataframe[col] == dataframe["predicted_" + col]).sum()
     incorrect = (dataframe[col] != dataframe["predicted_" + col]).sum()
     results[col] = {
-        "correct": correct,
-        "incorrect": incorrect,
-        "accuracy": correct / (correct + incorrect),
+        "correct": int(correct),
+        "incorrect": int(incorrect),
+        "accuracy": float(correct / (correct + incorrect)),
     }
-
-results
+print("all results")
+print(json.dumps(results, indent=4))
