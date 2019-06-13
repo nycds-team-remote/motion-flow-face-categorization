@@ -14,14 +14,41 @@ from keras.layers import Flatten
 from keras.layers import Dense
 import sys
 
-# # GET DATA
+# GET DATA
 
-files = [f for f in glob.glob("face_dataset/**/*.jpg", recursive=True)]
+# get data from motionflow dataset
+
+motionflow_files = [
+    f for f in glob.glob("data/motionflow/**/*.jpg", recursive=True)
+]
+
+imdb_crop_part1_files = [
+    f for f in glob.glob("data/crop_part1/**/*.jpg", recursive=True)
+]
 
 races = ["indian", "hispanic", "caucasian", "asian"]
 
 
-def getRow(f):
+def age_to_age_category(age):
+    if age < 18:
+        return "18minus"
+    elif age <= 24:
+        return "18to24"
+    elif age <= 34:
+        return "25to34"
+    elif age <= 44:
+        return "35to44"
+    elif age <= 54:
+        return "45to54"
+    elif age <= 64:
+        return "55to64"
+    elif age <= 75:
+        return "65to75"
+    else:
+        return "75plus"
+
+
+def get_motionflow_row(f):
     path = f.split("/")
     race = path[-2]
 
@@ -41,22 +68,7 @@ def getRow(f):
 
     age = int(parts[0].split(".")[0])
 
-    if age < 18:
-        age_category = "18minus"
-    elif age <= 24:
-        age_category = "18to24"
-    elif age <= 34:
-        age_category = "25to34"
-    elif age <= 44:
-        age_category = "35to44"
-    elif age <= 54:
-        age_category = "45to54"
-    elif age <= 64:
-        age_category = "55to64"
-    elif age <= 75:
-        age_category = "65to75"
-    else:
-        age_category = "75plus"
+    age_category = age_to_age_category(age)
 
     return {
         "age": age,
@@ -67,10 +79,63 @@ def getRow(f):
     }
 
 
-rows = list(map(getRow, files))
+failed_to_parse_imdb_rows = []
+
+
+def get_imdb_row(f):
+    try:
+        path = f.split("/")
+
+        filename = path[-1].split(".")[0]
+
+        parts = filename.split("_")
+
+        gender = parts[-1].strip()
+
+        gender_indices = {"1": "F", "0": "M"}
+
+        race_indices = {
+            "0": "caucasian",
+            "1": "african-american",
+            "2": "asian",
+            "3": "indian",
+            "4": "hispanic",
+        }
+
+        gender = gender_indices[parts[1]]
+        race = race_indices[parts[2]]
+        age = int(parts[0])
+
+        age_category = age_to_age_category(age)
+
+        return {
+            "age": age,
+            "age_category": age_category,
+            "gender": gender,
+            "race": race,
+            "filename": f,
+        }
+    except Exception as e:
+        print("error at filepath: " + f)
+        failed_to_parse_imdb_rows.append(f)
+        return None
+
+
+def mapMaybe(f, xs):
+    return list(filter(lambda x: x is not None, map(f, xs)))
+
+
+rows = mapMaybe(get_motionflow_row, motionflow_files) + mapMaybe(
+    get_imdb_row, imdb_crop_part1_files
+)
+
+print("failed to parse imdb: " + str(len(failed_to_parse_imdb_rows)))
 
 dataframe = pd.DataFrame(rows)
 
+# get data from crop_part1
+
+imdb_files = [f for f in glob.glob("data/crop_part1/**/*.jpg", recursive=True)]
 
 # BUILD CNN MODEL
 
@@ -146,7 +211,7 @@ if "--retrain" in sys.argv:
         elif class_mode == "categorical":
             class_mode = "categorical"
         elif class_mode == "continuous":
-            class_mode = None  # not sure why this works?
+            class_mode = "mse"  # TODO
         else:
             print(class_mode)
             raise ValueError("unrecognised class_mode")
@@ -177,10 +242,10 @@ if "--retrain" in sys.argv:
 
         classifier.fit_generator(
             training_set,
-            samples_per_epoch=5000,
+            samples_per_epoch=10000,
             epochs=10,
             validation_data=test_set,
-            validation_steps=250,
+            validation_steps=1000,
         )
 
         classifier.save(target + "_model.h5")
@@ -237,7 +302,7 @@ def predict_gender(filepath):
 
 
 # TEST SINGLE
-test_file = "face_dataset/caucasian/49.1_M.jpg"
+test_file = "data/motionflow/caucasian/49.1_M.jpg"
 
 start = time.time()
 
@@ -271,5 +336,6 @@ for col in ["age_category", "gender", "race"]:
         "incorrect": int(incorrect),
         "accuracy": float(correct / (correct + incorrect)),
     }
+
 print("all results")
 print(json.dumps(results, indent=4))
