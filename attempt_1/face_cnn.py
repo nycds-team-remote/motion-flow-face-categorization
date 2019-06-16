@@ -1,4 +1,5 @@
 # Importing the Keras libraries and packages
+from keras.applications import VGG16
 import time
 from keras.models import load_model
 from keras.preprocessing import image
@@ -139,6 +140,7 @@ imdb_files = [f for f in glob.glob("data/crop_part1/**/*.jpg", recursive=True)]
 
 # BUILD CNN MODEL
 
+
 if "--retrain" in sys.argv:
     print("retraining model")
 
@@ -146,16 +148,22 @@ if "--retrain" in sys.argv:
         classifier = Sequential()
 
         # Step 1 - Convolution
-        classifier.add(
-            Conv2D(32, 3, 3, input_shape=(64, 64, 3), activation="relu")
+        # classifier.add(
+        #     Conv2D(32, 3, 3, input_shape=(64, 64, 3), activation="relu")
+        # )
+        #
+        # # Step 2 - Pooling
+        # classifier.add(MaxPooling2D(pool_size=(2, 2)))
+        #
+        # # Adding a second convolutional layer
+        # classifier.add(Conv2D(32, 3, 3, activation="relu"))
+        # classifier.add(MaxPooling2D(pool_size=(2, 2)))
+        conv_base = VGG16(
+            weights="imagenet", include_top=False, input_shape=(64, 64, 3)
         )
 
-        # Step 2 - Pooling
-        classifier.add(MaxPooling2D(pool_size=(2, 2)))
-
-        # Adding a second convolutional layer
-        classifier.add(Conv2D(32, 3, 3, activation="relu"))
-        classifier.add(MaxPooling2D(pool_size=(2, 2)))
+        classifier.add(conv_base)
+        conv_base.trainable = False
 
         # Step 3 - Flattening
         classifier.add(Flatten())
@@ -211,7 +219,8 @@ if "--retrain" in sys.argv:
         elif class_mode == "categorical":
             class_mode = "categorical"
         elif class_mode == "continuous":
-            class_mode = "mse"  # TODO
+            # I don't understand why, but this seems to work
+            class_mode = "other"
         else:
             print(class_mode)
             raise ValueError("unrecognised class_mode")
@@ -238,21 +247,22 @@ if "--retrain" in sys.argv:
             subset="validation",
         )
 
-        print(type(test_set))
-
         classifier.fit_generator(
             training_set,
             samples_per_epoch=10000,
-            epochs=10,
+            epochs=3,
             validation_data=test_set,
-            validation_steps=1000,
+            validation_steps=100,
         )
 
         classifier.save(target + "_model.h5")
-        with open(target + "_class_indices.json", "w") as json_file:
+
+        with open(target + "_class_indices_2.json", "w") as json_file:
             json.dump(training_set.class_indices, json_file)
 
         return classifier, training_set, test_set
+
+    fit_and_save_model("age", "continuous")
 
     fit_and_save_model("race", "categorical")
 
@@ -262,17 +272,18 @@ if "--retrain" in sys.argv:
 
 # PREDICT VALUES DATA TYPES
 print("predicting")
+age_model = load_model("./age_model.h5")
 age_category_model = load_model("./age_category_model.h5")
 gender_model = load_model("./gender_model.h5")
 race_model = load_model("./race_model.h5")
 
-with open("age_category_class_indices.json", "r") as json_file:
+with open("age_category_class_indices_2.json", "r") as json_file:
     age_category_indices = {v: k for k, v in json.load(json_file).items()}
 
-with open("gender_class_indices.json", "r") as json_file:
+with open("gender_class_indices_2.json", "r") as json_file:
     gender_indices = {v: k for k, v in json.load(json_file).items()}
 
-with open("race_class_indices.json", "r") as json_file:
+with open("race_class_indices_2.json", "r") as json_file:
     race_indices = {v: k for k, v in json.load(json_file).items()}
 
 
@@ -280,6 +291,14 @@ def get_image(filepath):
     img = image.load_img(filepath, target_size=(64, 64))
     arr = image.img_to_array(img)
     return np.expand_dims(arr, axis=0)
+
+
+def predict_age(filepath):
+
+    raw_prediction = age_model.predict(get_image(filepath))
+    values = list(raw_prediction[0])
+    max_i = values.index(max(values))
+    return age_category_indices[max_i]
 
 
 def predict_age_category(filepath):
@@ -328,7 +347,7 @@ dataframe["predicted_race"] = dataframe.apply(
 )
 
 results = {}
-for col in ["age_category", "gender", "race"]:
+for col in ["age", "age_category", "gender", "race"]:
     correct = (dataframe[col] == dataframe["predicted_" + col]).sum()
     incorrect = (dataframe[col] != dataframe["predicted_" + col]).sum()
     results[col] = {
